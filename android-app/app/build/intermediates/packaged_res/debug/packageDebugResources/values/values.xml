@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <color name="ic_launcher_background">#1e293b</color>
+    <string name="app_name">DOS Device</string>
+    <style name="Theme.DOS" parent="Theme.MaterialComponents.DayNight.NoActionBar">
+        <item name="colorPrimary">#2563eb</item>
+        <item name="android:statusBarColor">#1e40af</item>
+    </style>
+</resources>

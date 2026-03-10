@@ -1,0 +1,351 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>DOS Admin</title>
+  <style>
+    * { box-sizing: border-box; }
+    body { font-family: system-ui, sans-serif; margin: 0; padding: 1rem; background: #1a1a1a; color: #e0e0e0; }
+    nav { display: flex; gap: 1rem; margin-bottom: 1.5rem; border-bottom: 1px solid #333; padding-bottom: 0.5rem; }
+    nav a { color: #7dd3fc; text-decoration: none; }
+    nav a:hover { text-decoration: underline; }
+    h1 { font-size: 1.25rem; margin: 0 0 1rem 0; }
+    section { display: none; }
+    section.active { display: block; }
+    table { width: 100%; border-collapse: collapse; }
+    th, td { text-align: left; padding: 0.5rem; border-bottom: 1px solid #333; }
+    th { color: #94a3b8; font-weight: 600; }
+    .badge { display: inline-block; padding: 0.2rem 0.5rem; border-radius: 4px; font-size: 0.75rem; }
+    .badge-done { background: #065f46; color: #6ee7b7; }
+    .badge-missed { background: #7f1d1d; color: #fca5a5; }
+    .badge-late { background: #78350f; color: #fde68a; }
+    .badge-pending { background: #334155; color: #94a3b8; }
+    button { background: #2563eb; color: white; border: none; padding: 0.4rem 0.8rem; border-radius: 6px; cursor: pointer; }
+    button:hover { background: #1d4ed8; }
+    button.secondary { background: #475569; }
+    input, select { padding: 0.4rem; border-radius: 4px; border: 1px solid #475569; background: #0f172a; color: #e0e0e0; }
+    .form-row {
+      margin-bottom: 0.9rem;
+      padding: 0.25rem 0;
+    }
+    .form-row label {
+      display: block;
+      margin-bottom: 0.3rem;
+      font-size: 0.8rem;
+      color: #9ca3af;
+    }
+    .form-row input {
+      width: 220px;
+      padding: 0.35rem 0.5rem;
+    }
+  </style>
+</head>
+<body>
+  <nav>
+    <a href="#devices">Devices</a>
+    <a href="#today">Today</a>
+    <a href="#logs">Logs</a>
+    <a href="#settings">Settings</a>
+  </nav>
+
+  <section id="devices" class="active">
+    <h1>Devices</h1>
+    <p><button id="btn-add-device">Add device</button></p>
+    <div id="device-form"></div>
+    <div id="devices-list"></div>
+  </section>
+
+  <section id="today">
+    <h1>Today</h1>
+    <p><button id="btn-generate-plans">Generate today's plans</button></p>
+    <div id="today-list"></div>
+  </section>
+
+  <section id="logs">
+    <h1>Logs</h1>
+    <div class="form-row">
+      <label>Date</label><input type="date" id="log-date" />
+      <label>Device</label><select id="log-device"><option value="">All</option></select>
+      <button id="btn-load-logs">Load</button>
+    </div>
+    <div id="logs-content"></div>
+  </section>
+
+  <section id="settings">
+    <h1>Settings</h1>
+    <div id="settings-form"></div>
+    <p><button id="btn-save-settings">Save</button></p>
+  </section>
+
+  <script>
+    const API = window.location.origin;
+
+    function qs(s) { return document.querySelector(s); }
+    function qsa(s) { return document.querySelectorAll(s); }
+
+    function showSection(id) {
+      qsa('section').forEach(s => s.classList.remove('active'));
+      const el = document.getElementById(id);
+      if (el) el.classList.add('active');
+    }
+
+    location.hash = location.hash || '#devices';
+    window.addEventListener('hashchange', () => showSection(location.hash.slice(1) || 'devices'));
+    showSection(location.hash.slice(1) || 'devices');
+
+    async function api(path, opts = {}) {
+      const r = await fetch(API + path, { headers: { 'Content-Type': 'application/json' }, ...opts });
+      if (!r.ok) throw new Error((await r.json()).error || r.statusText);
+      return r.json();
+    }
+
+    let personas = [];
+    let operators = [];
+
+    async function loadDevices() {
+      const [{ devices }, personasRes, operatorsRes] = await Promise.all([
+        api('/admin/devices'),
+        api('/admin/personas'),
+        api('/admin/operators')
+      ]);
+      personas = personasRes.personas || [];
+      operators = operatorsRes.operators || [];
+
+      const list = qs('#devices-list');
+      list.innerHTML = '<table><thead><tr><th>Name</th><th>Persona</th><th>Operator</th><th>Status</th><th>Token</th><th></th></tr></thead><tbody></tbody></table>';
+      const tbody = list.querySelector('tbody');
+      devices.forEach(d => {
+        const tr = document.createElement('tr');
+        tr.innerHTML = `
+          <td>${d.name}</td>
+          <td>${d.persona_name}</td>
+          <td>${d.operator_name || '—'}</td>
+          <td>${d.status}</td>
+          <td>
+            <span class="token-indicator">${d.has_token ? '✓' : '—'}</span>
+            <span class="token-value"></span>
+            <button class="secondary btn-token" type="button">${d.has_token ? 'Regenerate token' : 'Create token'}</button>
+          </td>
+          <td><button class="secondary btn-edit" type="button">Edit</button></td>
+        `;
+        tbody.appendChild(tr);
+        const editBtn = tr.querySelector('.btn-edit');
+        if (editBtn) {
+          editBtn.addEventListener('click', () => {
+            showDeviceForm(d);
+          });
+        }
+        const tokenBtn = tr.querySelector('.btn-token');
+        if (tokenBtn) {
+          tokenBtn.addEventListener('click', async () => {
+            try {
+              const res = await api(`/admin/devices/${d.id}/provision-token`, {
+                method: 'POST',
+                body: JSON.stringify({})
+              });
+              const msg =
+                (res && res.message ? res.message : 'Token created.') +
+                (res && res.token ? '\n\nToken: ' + res.token : '');
+              alert(msg);
+              const cell = tokenBtn.parentElement;
+              if (cell) {
+                const indicator = cell.querySelector('.token-indicator');
+                const valueSpan = cell.querySelector('.token-value');
+                if (indicator) indicator.textContent = '✓';
+                if (valueSpan && res && res.token) valueSpan.textContent = ' ' + res.token;
+              }
+            } catch (e) {
+              const errMsg = e instanceof Error ? e.message : String(e);
+              alert(errMsg);
+            }
+          });
+        }
+      });
+    }
+
+    function showDeviceForm(device) {
+      const form = qs('#device-form');
+      if (!personas.length) {
+        form.innerHTML = '<p style="color:#fca5a5">No personas found. Run DB init or check seeds.</p>';
+        return;
+      }
+      const personaOptions = personas
+        .map(p => `<option value="${p.id}"${device && device.persona_id === p.id ? ' selected' : ''}>${p.name}</option>`)
+        .join('');
+      const operatorOptions = ['<option value="">Unassigned</option>']
+        .concat(
+          (operators || []).map(
+            o => `<option value="${o.id}"${device && device.operator_id === o.id ? ' selected' : ''}>${o.name}</option>`
+          )
+        )
+        .join('');
+      const statusRow = device
+        ? `
+        <div class="form-row">
+          <label>Status</label>
+          <select id="device-status">
+            <option value="active"${device.status === 'active' ? ' selected' : ''}>active</option>
+            <option value="paused"${device.status === 'paused' ? ' selected' : ''}>paused</option>
+            <option value="retired"${device.status === 'retired' ? ' selected' : ''}>retired</option>
+          </select>
+        </div>`
+        : '';
+
+      form.innerHTML = `
+        <div class="form-row">
+          <label>Device name</label>
+          <input type="text" id="new-device-name" placeholder="e.g. Phone 1" value="${device ? device.name : ''}" />
+        </div>
+        <div class="form-row">
+          <label>Persona</label>
+          <select id="new-device-persona">${personaOptions}</select>
+        </div>
+        <div class="form-row">
+          <label>Operator</label>
+          <select id="new-device-operator">${operatorOptions}</select>
+        </div>
+        ${statusRow}
+        <div class="form-row">
+          <label>Add operator name (optional)</label>
+          <div style="display:flex; gap:0.5rem; align-items:center; flex-wrap:wrap;">
+            <input type="text" id="new-operator-name" placeholder="e.g. Alex" />
+            <button id="btn-add-operator" class="secondary" type="button">Add operator</button>
+          </div>
+        </div>
+        <button id="btn-save-device">${device ? 'Update device' : 'Save device'}</button>
+      `;
+
+      qs('#btn-add-operator').addEventListener('click', async () => {
+        const input = qs('#new-operator-name');
+        const name = input && input.value ? input.value.trim() : '';
+        if (!name) {
+          alert('Operator name required');
+          return;
+        }
+        try {
+          const created = await api('/admin/operators', {
+            method: 'POST',
+            body: JSON.stringify({ name })
+          });
+          operators = (operators || []).concat([created]);
+          const operatorSelect = qs('#new-device-operator');
+          const opt = document.createElement('option');
+          opt.value = created.id;
+          opt.textContent = created.name;
+          operatorSelect.appendChild(opt);
+          operatorSelect.value = created.id;
+          input.value = '';
+        } catch (e) {
+          const msg = e instanceof Error ? e.message : String(e);
+          alert(msg);
+        }
+      });
+
+      qs('#btn-save-device').addEventListener('click', async () => {
+        const nameEl = qs('#new-device-name');
+        const personaEl = qs('#new-device-persona');
+        const operatorEl = qs('#new-device-operator');
+        const statusEl = qs('#device-status');
+        const name = nameEl && nameEl.value ? nameEl.value.trim() : '';
+        const personaId = personaEl && personaEl.value ? personaEl.value : '';
+        const operatorId = operatorEl && operatorEl.value ? operatorEl.value : null;
+        const status = statusEl && statusEl.value ? statusEl.value : undefined;
+        if (!name || !personaId) {
+          alert('Name and persona are required');
+          return;
+        }
+        try {
+          const path = device ? `/admin/devices/${device.id}` : '/admin/devices';
+          const method = device ? 'PATCH' : 'POST';
+          const body = device
+            ? { name, persona_id: personaId, operator_id: operatorId, status }
+            : { name, persona_id: personaId, operator_id: operatorId };
+          await api(path, {
+            method,
+            body: JSON.stringify(body)
+          });
+          form.innerHTML = '';
+          loadDevices();
+        } catch (e) {
+          const msg = e instanceof Error ? e.message : String(e);
+          alert(msg);
+        }
+      });
+    }
+
+    async function loadToday() {
+      const data = await api('/admin/today');
+      const list = qs('#today-list');
+      list.innerHTML = '';
+      data.devices.forEach(d => {
+        const card = document.createElement('div');
+        card.style.marginBottom = '1rem';
+        card.style.padding = '0.75rem';
+        card.style.border = '1px solid #333';
+        card.style.borderRadius = '6px';
+        let html = `<strong>${d.device_name}</strong> · ${d.persona_name} · ${d.daily_mode}<br>`;
+        html += 'Sessions: ' + (d.session_logs || []).map(s => `<span class="badge badge-${s.status === 'completed' ? 'done' : s.status === 'late' ? 'late' : 'missed'}">${s.status}</span>`).join(' ');
+        html += '<br>Posts: ' + (d.post_logs || []).map(p => `<span class="badge badge-${p.status === 'completed' ? 'done' : 'missed'}">${p.status}</span>`).join(' ');
+        card.innerHTML = html;
+        list.appendChild(card);
+      });
+    }
+
+    async function loadLogs() {
+      const date = qs('#log-date').value || new Date().toISOString().slice(0,10);
+      const device = qs('#log-device').value;
+      let path = `/admin/logs?date=${date}`;
+      if (device) path += `&device_id=${device}`;
+      const { session_logs, post_logs } = await api(path);
+      const div = qs('#logs-content');
+      div.innerHTML = '<h3>Session logs</h3><pre>' + JSON.stringify(session_logs.slice(0, 50), null, 2) + '</pre><h3>Post logs</h3><pre>' + JSON.stringify(post_logs.slice(0, 50), null, 2) + '</pre>';
+    }
+
+    async function loadSettings() {
+      const s = await api('/admin/settings');
+      const form = qs('#settings-form');
+      form.innerHTML = Object.entries(s).map(([k, v]) => `<div class="form-row"><label>${k}</label><input type="text" data-key="${k}" value="${v}" /></div>`).join('');
+    }
+
+    qs('#btn-generate-plans').addEventListener('click', async () => {
+      try {
+        await api('/admin/generate-plans', { method: 'POST', body: JSON.stringify({}) });
+        loadToday();
+      } catch (e) { alert(e.message); }
+    });
+
+    // Expose a force-regenerate flow via prompt so you can quickly
+    // blow away today's plans and rebuild them with new persona/device config.
+    qs('#btn-generate-plans').addEventListener('contextmenu', async (ev) => {
+      ev.preventDefault();
+      if (!confirm('Force regenerate today\\'s plans? This will clear today\\'s plans and logs.')) return;
+      try {
+        await api('/admin/regenerate-plans', { method: 'POST', body: JSON.stringify({}) });
+        loadToday();
+      } catch (e) {
+        const msg = e instanceof Error ? e.message : String(e);
+        alert(msg);
+      }
+    });
+
+    qs('#btn-add-device').addEventListener('click', () => showDeviceForm());
+    qs('#btn-load-logs').addEventListener('click', loadLogs);
+    qs('#btn-save-settings').addEventListener('click', async () => {
+      const inputs = qsa('#settings-form input');
+      const body = {};
+      inputs.forEach(i => { body[i.dataset.key] = i.value; });
+      await api('/admin/settings', { method: 'POST', body: JSON.stringify(body) });
+      alert('Saved');
+    });
+
+    loadDevices();
+    loadToday();
+    loadSettings();
+    api('/admin/devices').then(({ devices }) => {
+      const sel = qs('#log-device');
+      devices.forEach(d => { const o = document.createElement('option'); o.value = d.id; o.textContent = d.name; sel.appendChild(o); });
+    });
+  </script>
+</body>
+</html>

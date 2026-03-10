@@ -1,0 +1,10 @@
+[
+    {
+        "merged": "com.dos.device.app-mergeDebugResources-30:/layout/screen_enroll.xml",
+        "source": "com.dos.device.app-main-33:/layout/screen_enroll.xml"
+    },
+    {
+        "merged": "com.dos.device.app-mergeDebugResources-30:/layout/activity_main.xml",
+        "source": "com.dos.device.app-main-33:/layout/activity_main.xml"
+    }
+]
