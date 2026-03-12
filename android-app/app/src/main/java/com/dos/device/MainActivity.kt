@@ -17,7 +17,7 @@ class MainActivity : AppCompatActivity() {
     private lateinit var tokenStore: TokenStore
     private lateinit var logQueue: LogQueue
     private var plan: TodayPlanResponse? = null
-    private var serverBaseUrl: String = "http://10.0.2.2:3000/"
+    private var serverBaseUrl: String = "http://16.112.55.75/"
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -42,7 +42,7 @@ class MainActivity : AppCompatActivity() {
                 Toast.makeText(this, "Enter device token", Toast.LENGTH_SHORT).show()
                 return@setOnClickListener
             }
-            val url = if (baseUrl.isNotBlank()) baseUrl else "http://10.0.2.2:3000/"
+            val url = if (baseUrl.isNotBlank()) baseUrl else "http://16.112.55.75/"
             tokenStore.serverBaseUrl = url
             lifecycleScope.launch {
                 enroll(token, url)
@@ -112,8 +112,9 @@ class MainActivity : AppCompatActivity() {
 
         sessionsContainer.removeAllViews()
         p.sessions.sortedBy { it.sort_order }.forEach { s ->
+            val timeRange = formatSessionTimeRange(s.planned_start, s.planned_duration_min)
             val row = layoutInflater.inflate(android.R.layout.simple_list_item_2, sessionsContainer, false)
-            (row.findViewById(android.R.id.text1) as TextView).text = "${s.planned_start} (${s.planned_duration_min} min)"
+            (row.findViewById(android.R.id.text1) as TextView).text = "$timeRange (${s.planned_duration_min} min)"
             val focusLine = buildString {
                 if (s.dominant_accounts.isNotEmpty()) {
                     append("Focus: ")
@@ -126,12 +127,18 @@ class MainActivity : AppCompatActivity() {
                 }
             }.ifEmpty { "Session" }
             (row.findViewById(android.R.id.text2) as TextView).text = focusLine
-            val btn = Button(this).apply {
+
+            val startBtn = Button(this).apply {
                 text = "Start"
                 setOnClickListener { markSessionStart(s.id, s.planned_start, s.planned_duration_min) }
             }
+            val endBtn = Button(this).apply {
+                text = "End"
+                setOnClickListener { markSessionEnd(s) }
+            }
             sessionsContainer.addView(row)
-            sessionsContainer.addView(btn)
+            sessionsContainer.addView(startBtn)
+            sessionsContainer.addView(endBtn)
         }
 
         postsContainer.removeAllViews()
@@ -149,14 +156,14 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun markSessionStart(sessionId: String, plannedStart: String, durationMin: Int) {
-        val idempotencyKey = "session-${sessionId}-${System.currentTimeMillis()}"
+        val idempotencyKey = "session-start-${sessionId}-${System.currentTimeMillis()}"
         val entry = LogQueue.SessionLogEntry(
             session_id = sessionId,
             planned_start = plannedStart,
             planned_duration_min = durationMin,
             actual_start = java.text.SimpleDateFormat("HH:mm", java.util.Locale.US).format(java.util.Date()),
             actual_end = null,
-            status = "completed",
+            status = "started",
             idempotency_key = idempotencyKey
         )
         logQueue.enqueueSession(entry)
@@ -177,6 +184,23 @@ class MainActivity : AppCompatActivity() {
         )
         logQueue.enqueuePost(entry)
         Toast.makeText(this, "Post logged (pending sync)", Toast.LENGTH_SHORT).show()
+        syncPendingLogs()
+    }
+
+    private fun markSessionEnd(session: com.dos.device.api.models.PlanSession) {
+        val idempotencyKey = "session-end-${session.id}-${System.currentTimeMillis()}"
+        val now = java.text.SimpleDateFormat("HH:mm", java.util.Locale.US).format(java.util.Date())
+        val entry = LogQueue.SessionLogEntry(
+            session_id = session.id,
+            planned_start = session.planned_start,
+            planned_duration_min = session.planned_duration_min,
+            actual_start = null,
+            actual_end = now,
+            status = "completed",
+            idempotency_key = idempotencyKey
+        )
+        logQueue.enqueueSession(entry)
+        Toast.makeText(this, "Session end logged (pending sync)", Toast.LENGTH_SHORT).show()
         syncPendingLogs()
     }
 
@@ -228,6 +252,23 @@ class MainActivity : AppCompatActivity() {
             withContext(Dispatchers.Main) {
                 Toast.makeText(this@MainActivity, if (stillPending.isEmpty()) "Sync done" else "Some logs failed; will retry later", Toast.LENGTH_SHORT).show()
             }
+        }
+    }
+
+    private fun formatSessionTimeRange(start: String, durationMin: Int): String {
+        return try {
+            // Expecting times like "18:32" or full ISO, so take the last 5 chars as HH:mm
+            val timePart = if (start.length >= 5) start.takeLast(5) else start
+            val sdf = java.text.SimpleDateFormat("HH:mm", java.util.Locale.US)
+            val date = sdf.parse(timePart) ?: return start
+            val cal = java.util.Calendar.getInstance().apply {
+                time = date
+                add(java.util.Calendar.MINUTE, durationMin)
+            }
+            val end = sdf.format(cal.time)
+            "$timePart–$end"
+        } catch (_: Exception) {
+            start
         }
     }
 }

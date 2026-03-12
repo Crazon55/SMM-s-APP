@@ -7,7 +7,7 @@ import java.util.concurrent.TimeUnit
 
 object RetrofitModule {
 
-    private const val DEFAULT_BASE_URL = "http://10.0.2.2:3000/"
+    private const val DEFAULT_BASE_URL = "http://16.112.55.75/"
 
     fun createApi(baseUrl: String = DEFAULT_BASE_URL): ApiService {
         val client = OkHttpClient.Builder()
