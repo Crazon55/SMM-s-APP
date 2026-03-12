@@ -289,8 +289,43 @@
         card.style.border = '1px solid #333';
         card.style.borderRadius = '6px';
         let html = `<strong>${d.device_name}</strong> · ${d.persona_name} · ${d.daily_mode}<br>`;
-        html += 'Sessions: ' + (d.session_logs || []).map(s => `<span class="badge badge-${s.status === 'completed' ? 'done' : s.status === 'late' ? 'late' : 'missed'}">${s.status}</span>`).join(' ');
-        html += '<br>Posts: ' + (d.post_logs || []).map(p => `<span class="badge badge-${p.status === 'completed' ? 'done' : 'missed'}">${p.status}</span>`).join(' ');
+
+        const sessions = d.sessions || [];
+        if (sessions.length) {
+          html += '<div style="margin-top:0.5rem;"><strong>Sessions</strong></div>';
+          html += '<table style="margin-top:0.25rem;"><thead><tr><th>Planned</th><th>Dur</th><th>Status</th><th>Actual start</th><th>Actual end</th></tr></thead><tbody>';
+          sessions.forEach(s => {
+            const badgeClass =
+              s.status === 'completed'
+                ? 'badge-done'
+                : s.status === 'missed'
+                  ? 'badge-missed'
+                  : s.status === 'late'
+                    ? 'badge-late'
+                    : 'badge-pending';
+            html += `<tr>
+              <td>${s.planned_start}</td>
+              <td>${s.planned_duration_min} min</td>
+              <td><span class="badge ${badgeClass}">${s.status}</span></td>
+              <td>${s.actual_start || '—'}</td>
+              <td>${s.actual_end || '—'}</td>
+            </tr>`;
+          });
+          html += '</tbody></table>';
+        } else {
+          html += '<div style="margin-top:0.5rem;">No sessions planned.</div>';
+        }
+
+        const posts = d.post_logs || [];
+        if (posts.length) {
+          html += '<div style="margin-top:0.5rem;"><strong>Posts</strong></div>';
+          html += posts
+            .map(
+              p =>
+                `<span class="badge ${p.status === 'completed' ? 'badge-done' : 'badge-missed'}">${p.status}</span>`
+            )
+            .join(' ');
+        }
         card.innerHTML = html;
         list.appendChild(card);
       });

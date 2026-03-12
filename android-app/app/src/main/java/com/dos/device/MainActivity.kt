@@ -1,5 +1,9 @@
 package com.dos.device
 
+import android.app.AlarmManager
+import android.app.PendingIntent
+import android.content.Context
+import android.content.Intent
 import android.os.Bundle
 import android.widget.*
 import androidx.appcompat.app.AppCompatActivity
@@ -111,6 +115,9 @@ class MainActivity : AppCompatActivity() {
         content.text = "${p.persona_name} · ${p.daily_mode}\nWindow: ${p.active_window.start}–${p.active_window.end}"
 
         sessionsContainer.removeAllViews()
+        // Schedule local alarms for each upcoming session
+        scheduleSessionAlarms(p)
+
         p.sessions.sortedBy { it.sort_order }.forEach { s ->
             val timeRange = formatSessionTimeRange(s.planned_start, s.planned_duration_min)
             val row = layoutInflater.inflate(android.R.layout.simple_list_item_2, sessionsContainer, false)
@@ -251,6 +258,47 @@ class MainActivity : AppCompatActivity() {
             logQueue.replacePending(stillPending)
             withContext(Dispatchers.Main) {
                 Toast.makeText(this@MainActivity, if (stillPending.isEmpty()) "Sync done" else "Some logs failed; will retry later", Toast.LENGTH_SHORT).show()
+            }
+        }
+    }
+
+    private fun scheduleSessionAlarms(p: TodayPlanResponse) {
+        val am = getSystemService(Context.ALARM_SERVICE) as AlarmManager
+        val now = System.currentTimeMillis()
+        val sdf = java.text.SimpleDateFormat("HH:mm", java.util.Locale.US)
+
+        p.sessions.forEach { s ->
+            try {
+                val timePart = if (s.planned_start.length >= 5) s.planned_start.takeLast(5) else s.planned_start
+                val cal = java.util.Calendar.getInstance().apply {
+                    timeInMillis = now
+                    val parsed = sdf.parse(timePart)
+                    if (parsed != null) {
+                        val hhmm = java.util.Calendar.getInstance().apply { time = parsed }
+                        set(java.util.Calendar.HOUR_OF_DAY, hhmm.get(java.util.Calendar.HOUR_OF_DAY))
+                        set(java.util.Calendar.MINUTE, hhmm.get(java.util.Calendar.MINUTE))
+                        set(java.util.Calendar.SECOND, 0)
+                        set(java.util.Calendar.MILLISECOND, 0)
+                    }
+                    // If this time has already passed today, skip scheduling.
+                    if (timeInMillis <= now) return@forEach
+                }
+
+                val intent = Intent(this, SessionAlarmReceiver::class.java).apply {
+                    putExtra("title", "${p.persona_name} · ${p.daily_mode}")
+                    putExtra("text", "Session at ${s.planned_start} starting now")
+                    putExtra("session_id", s.id)
+                }
+                val requestCode = s.id.hashCode()
+                val pending = PendingIntent.getBroadcast(
+                    this,
+                    requestCode,
+                    intent,
+                    PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+                )
+                am.setExactAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, cal.timeInMillis, pending)
+            } catch (_: Exception) {
+                // ignore bad time formats
             }
         }
     }

@@ -30,9 +30,25 @@ adminRouter.get("/today", (_req, res) => {
     operator_name: string | null;
   }>;
 
+  const sessions = db
+    .prepare(
+      `SELECT ps.id, ps.device_id, ps.planned_start, ps.planned_duration_min, ps.sort_order
+       FROM planned_sessions ps
+       JOIN daily_plans dp ON dp.id = ps.daily_plan_id
+       WHERE dp.plan_date = ?
+       ORDER BY ps.device_id, ps.sort_order`
+    )
+    .all(today) as Array<{
+    id: string;
+    device_id: string;
+    planned_start: string;
+    planned_duration_min: number;
+    sort_order: number;
+  }>;
+
   const sessionLogs = db
     .prepare(
-      `SELECT sl.device_id, sl.session_id, sl.status, sl.actual_start, sl.actual_end
+      `SELECT sl.device_id, sl.session_id, sl.status, sl.actual_start, sl.actual_end, sl.created_at
        FROM session_logs sl
        JOIN planned_sessions ps ON ps.id = sl.session_id
        JOIN daily_plans dp ON dp.id = ps.daily_plan_id
@@ -44,6 +60,7 @@ adminRouter.get("/today", (_req, res) => {
     status: string;
     actual_start: string | null;
     actual_end: string | null;
+    created_at: string;
   }>;
 
   const postLogs = db
@@ -59,6 +76,27 @@ adminRouter.get("/today", (_req, res) => {
     actual_time: string | null;
   }>;
 
+  // Build a quick lookup of latest log per session_id
+  const latestLogBySessionId = new Map<
+    string,
+    { status: string; actual_start: string | null; actual_end: string | null }
+  >();
+  for (const log of sessionLogs) {
+    const existing = latestLogBySessionId.get(log.session_id);
+    if (!existing || log.created_at > (existing as unknown as { created_at: string }).created_at) {
+      // Store status + times, and keep created_at only for comparison via cast
+      latestLogBySessionId.set(
+        log.session_id,
+        {
+          status: log.status,
+          actual_start: log.actual_start,
+          actual_end: log.actual_end,
+        } as any
+      );
+      (latestLogBySessionId.get(log.session_id) as any).created_at = log.created_at;
+    }
+  }
+
   res.json({
     plan_date: today,
     devices: plans.map((p) => ({
@@ -69,6 +107,22 @@ adminRouter.get("/today", (_req, res) => {
       operator_name: p.operator_name,
       daily_mode: p.daily_mode,
       session_count: p.session_count,
+      sessions: sessions
+        .filter((s) => s.device_id === p.device_id)
+        .map((s) => {
+          const log = latestLogBySessionId.get(s.id) as
+            | { status: string; actual_start: string | null; actual_end: string | null; created_at?: string }
+            | undefined;
+          return {
+            id: s.id,
+            planned_start: s.planned_start,
+            planned_duration_min: s.planned_duration_min,
+            sort_order: s.sort_order,
+            status: log?.status ?? "pending",
+            actual_start: log?.actual_start ?? null,
+            actual_end: log?.actual_end ?? null,
+          };
+        }),
       session_logs: sessionLogs.filter((s) => s.device_id === p.device_id),
       post_logs: postLogs.filter((l) => l.device_id === p.device_id),
     })),
