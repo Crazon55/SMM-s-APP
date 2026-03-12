@@ -5,7 +5,7 @@
   "type": "module",
   "main": "dist/index.js",
   "scripts": {
-    "build": "tsc && node -e \"const fs=require('fs');const p=require('path');const d=p.join('dist','db');if(!fs.existsSync(d))fs.mkdirSync(d,{recursive:true});fs.copyFileSync(p.join('src','db','schema.sql'),p.join(d,'schema.sql'));\"",
+    "build": "tsc",
     "dev": "tsx watch src/index.ts",
     "start": "node dist/index.js",
     "db:init": "tsx src/db/init.ts",
