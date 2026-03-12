@@ -87,6 +87,9 @@ app.use(express.static(publicPath));
 app.get("/admin-ui", (_req, res) => {
   res.sendFile(join(publicPath, "admin", "index.html"));
 });
+app.get("/", (_req, res) => {
+  res.redirect(302, "/admin-ui");
+});
 
 const PORT = process.env.PORT ?? 3000;
 app.listen(PORT, () => {
