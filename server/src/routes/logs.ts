@@ -20,33 +20,54 @@ logsRouter.post("/session", requireDeviceAuth, (req, res) => {
   }
 
   const db = getDb();
-  const idempotencyKey =
-    body.idempotency_key || `session-${deviceId}-${body.session_id}-${Date.now()}`;
 
-  const existing = db.prepare("SELECT id FROM session_logs WHERE idempotency_key = ?").get(idempotencyKey);
-  if (existing) {
-    res.status(200).json({ id: (existing as { id: string }).id, duplicate: true });
+  // We want a single row per (device, session_id), updating it as we get start/end events.
+  const existing = db
+    .prepare(
+      "SELECT id, actual_start, actual_end, status FROM session_logs WHERE device_id = ? AND session_id = ? ORDER BY created_at LIMIT 1"
+    )
+    .get(deviceId, body.session_id) as
+    | { id: string; actual_start: string | null; actual_end: string | null; status: string }
+    | undefined;
+
+  if (!existing) {
+    // First time we see this session: insert a row with whatever fields we have.
+    const id = uuidv4();
+    const idempotencyKey =
+      body.idempotency_key || `session-${deviceId}-${body.session_id}-${Date.now()}`;
+
+    db.prepare(
+      `INSERT INTO session_logs (id, device_id, session_id, planned_start, planned_duration_min, actual_start, actual_end, status, server_time_iso, idempotency_key)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+    ).run(
+      id,
+      deviceId,
+      body.session_id,
+      body.planned_start,
+      body.planned_duration_min,
+      body.actual_start ?? null,
+      body.actual_end ?? null,
+      body.status,
+      new Date().toISOString(),
+      idempotencyKey
+    );
+
+    res.status(201).json({ id, created: true, updated: false });
     return;
   }
 
-  const id = uuidv4();
-  db.prepare(
-    `INSERT INTO session_logs (id, device_id, session_id, planned_start, planned_duration_min, actual_start, actual_end, status, server_time_iso, idempotency_key)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
-  ).run(
-    id,
-    deviceId,
-    body.session_id,
-    body.planned_start,
-    body.planned_duration_min,
-    body.actual_start ?? null,
-    body.actual_end ?? null,
-    body.status,
-    new Date().toISOString(),
-    idempotencyKey
-  );
+  // Update existing row: fill in start/end if provided, and bump status.
+  const newActualStart = body.actual_start ?? existing.actual_start;
+  const newActualEnd = body.actual_end ?? existing.actual_end;
+  const newStatus = body.status || existing.status;
 
-  res.status(201).json({ id });
+  db.prepare(
+    `UPDATE session_logs
+     SET actual_start = ?, actual_end = ?, status = ?, server_time_iso = ?
+     WHERE id = ?`
+  ).run(newActualStart, newActualEnd, newStatus, new Date().toISOString(), existing.id);
+
+  res.status(200).json({ id: existing.id, created: false, updated: true });
 });
 
 logsRouter.post("/post", requireDeviceAuth, (req, res) => {

@@ -137,10 +137,27 @@ export function generateDailyPlans(db: Database.Database, planDate: string): voi
 
     for (const dev of devices) {
       const mode = assignMode(dev.id, dev.operator_id);
+
+      // Base session count from persona, then tweak per mode.
       let sessionCount =
         dev.session_count_min +
         Math.floor(Math.random() * (dev.session_count_max - dev.session_count_min + 1));
-      sessionCount = Math.max(3, Math.min(6, sessionCount));
+
+      // Per‑mode adjustments:
+      // - heavy  = fewer, longer sessions
+      // - light  = more, shorter sessions
+      // - normal = persona defaults
+      // - post_only = very light scrolling sessions
+      if (mode === "heavy") {
+        sessionCount = Math.max(3, Math.round(sessionCount * 0.7));
+      } else if (mode === "light") {
+        sessionCount = Math.min(8, Math.round(sessionCount * 1.4));
+      } else if (mode === "post_only") {
+        sessionCount = Math.max(2, Math.round(sessionCount * 0.5));
+      }
+
+      // Global clamp so things don’t explode.
+      sessionCount = Math.max(2, Math.min(8, sessionCount));
 
       const windowStart = parseTime(dev.active_window_start);
       // Stagger shutdown: trim the active window end differently per device
@@ -163,11 +180,33 @@ export function generateDailyPlans(db: Database.Database, planDate: string): voi
         }
       }
 
+      // Per‑mode duration ranges derived from persona defaults.
+      let durationMin = dev.session_duration_min;
+      let durationMax = dev.session_duration_max;
+
+      if (mode === "heavy") {
+        // Longer, more immersive sessions.
+        durationMin = Math.round(durationMin * 1.4);
+        durationMax = Math.round(durationMax * 1.8);
+      } else if (mode === "light") {
+        // Shorter check‑ins, but more of them.
+        durationMin = Math.round(durationMin * 0.6);
+        durationMax = Math.round(durationMax * 0.8);
+      } else if (mode === "post_only") {
+        // Tiny “just post and leave” sessions.
+        durationMin = Math.max(5, Math.round(durationMin * 0.4));
+        durationMax = Math.max(durationMin + 3, Math.round(durationMax * 0.6));
+      }
+
+      // Hard safety caps.
+      durationMin = Math.max(10, Math.min(60, durationMin));
+      durationMax = Math.max(durationMin + 5, Math.min(90, durationMax));
+
       const sessionDurations: number[] = [];
       for (let i = 0; i < sessionCount; i++) {
         const dur =
-          dev.session_duration_min +
-          Math.floor(Math.random() * (dev.session_duration_max - dev.session_duration_min + 1));
+          durationMin +
+          Math.floor(Math.random() * (durationMax - durationMin + 1));
         sessionDurations.push(dur);
       }
 
