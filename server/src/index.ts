@@ -85,6 +85,7 @@ app.post("/admin/operators", (req, res) => {
 const publicPath = join(__dirname, "../public");
 app.use(express.static(publicPath));
 app.get("/admin-ui", (_req, res) => {
+  res.setHeader("Cache-Control", "no-store, no-cache, must-revalidate");
   res.sendFile(join(publicPath, "admin", "index.html"));
 });
 app.get("/", (_req, res) => {
