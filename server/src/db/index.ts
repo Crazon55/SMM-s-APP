@@ -9,7 +9,8 @@ let db: Database.Database | null = null;
 
 export function getDb(dbPath?: string): Database.Database {
   if (!db) {
-    const path = dbPath ?? join(__dirname, "../../data/dos.db");
+    const baseDataDir = process.env.DATA_DIR || join(__dirname, "../../data");
+const path = dbPath ?? join(baseDataDir, "dos.db");
     db = new Database(path);
     db.pragma("journal_mode = WAL");
     db.pragma("foreign_keys = ON");

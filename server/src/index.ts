@@ -21,7 +21,7 @@ const app = express();
 app.use(cors());
 app.use(express.json());
 
-const dataDir = join(__dirname, "../data");
+const dataDir = process.env.DATA_DIR || join(__dirname, "../data");
 if (!existsSync(dataDir)) mkdirSync(dataDir, { recursive: true });
 try {
   initDb();
